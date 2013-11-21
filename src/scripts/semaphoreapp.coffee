@@ -26,23 +26,30 @@
 #     Examples:
 #
 #       "The Internal Room"
-#         =>  Notifications of any branch go to "The Internal Room".
+#         =>  Notifications of any branch or project go to "The Internal Room".
 #
-#       "The Serious Room:master"
-#         =>  Notifications of master branch go to "The Serious Room",
-#             notifications of other branches will be discarded.
+#       "The Serious Room::master"
+#         =>  Notifications of any project's master branch go to
+#             "The Serious Room", notifications of other branches will be
+#             discarded.
 #
-#       "The Serious Room:master,The Internal Room:(?!master).*"
-#         =>  Notifications of master branch go to "The Serious Room",
-#             notifications of other branches go to "The Internal Room".
+#       "The Developers Room:Blog:master"
+#         =>  Notifications of the project "Blog"'s master branch go to
+#             "The Serious Room", notifications of other branches will be
+#             discarded.
 #
-#       "The Developers Room:.*(test|experiment).*"
+#       "The Serious Room:Blog:master,The Internal Room:(?!Blog):"
+#         =>  Notifications of the project "Blog"'s master branch go to
+#             "The Serious Room", notifications of any project's branches,
+#             except "Blog" go to "The Internal Room".
+#
+#       "The Developers Room::.*(test|experiment).*"
 #         =>  Notifications of branches that contain "test" or "experiment"
-#             go to "The Developers Room", notifications of other branches
-#             will be discarded.
+#             from any project go to "The Developers Room", notifications of
+#             other branches will be discarded.
 #
 # Commands:
-#   hubot semaphoreapp status [<project> [<branch>]] - Reports build status for projects' branches
+#   hubot semaphore status [<project> [<branch>]] - Reports build status for projects' branches
 #
 # URLs:
 #   POST /hubot/semaphoreapp
@@ -51,7 +58,8 @@
 #     or if you deployed Hubot onto Heroku: "<HEROKU_URL>/hubot/semaphoreapp".
 #
 # Author:
-#   exalted
+#   exalted, uxp
+#
 
 module.exports = (robot) ->
   if process.env.HUBOT_SEMAPHOREAPP_TRIGGER
@@ -141,7 +149,14 @@ module.exports = (robot) ->
     rules = process.env.HUBOT_SEMAPHOREAPP_NOTIFY_RULES.split(',')
     for rule in (x.split(':') for x in rules)
       room = rule[0]
-      branch = rule[1]
+      project = rule[1]
+      branch = rule[2]
+
+      try
+        projectRegExp = new RegExp("^#{project}$" if project)
+      catch error
+        console.log "semaphoreapp error: #{error}."
+        return
 
       try
         branchRegExp = new RegExp("^#{branch}$" if branch)
@@ -149,7 +164,7 @@ module.exports = (robot) ->
         console.log "semaphoreapp error: #{error}."
         return
 
-      if branchRegExp.test(payload.branch_name)
+      if projectRegExp.test(payload.project_name) && branchRegExp.test(payload.branch_name)
         robot.messageRoom room, statusMessage payload
 
 tellEitherOneOfThese = (things) ->
