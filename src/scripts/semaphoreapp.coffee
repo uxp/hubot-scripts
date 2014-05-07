@@ -65,6 +65,18 @@ module.exports = (robot) ->
   if process.env.HUBOT_SEMAPHOREAPP_TRIGGER
     trigger = process.env.HUBOT_SEMAPHOREAPP_TRIGGER.split(',').join('|')
 
+  robot.respond new RegExp("(?:semaphoreapp|#{trigger})\\s+build(?:\\s+(\\S+)(?:\\s+(\\S+))?)?\\s*$", "i"), (msg) ->
+    semaphoreapp = new SemaphoreApp msg
+
+    # Read parameters
+    projectName = msg.match[1]
+    branchName = msg.match[2]
+
+    semaphoreapp.rebuildLastRevisionForBranch projectName, branchName, (rebuild) ->
+      if rebuild.html_url > 0
+        msg.reply "Rebuilding branch '#{rebuild.branch_name}' of '#{rebuild.project_name}'\n(#{rebuild.html_url})"
+
+
   robot.respond new RegExp("(?:semaphoreapp|#{trigger})\\s+status(?:\\s+(\\S+)(?:\\s+(\\S+))?)?\\s*$", "i"), (msg) ->
     semaphoreapp = new SemaphoreApp msg
 
@@ -196,6 +208,22 @@ class SemaphoreApp
     @msg.robot.http("https://semaphoreapp.com/api/v1/projects")
       .query(auth_token: "#{process.env.HUBOT_SEMAPHOREAPP_AUTH_TOKEN}")
       .get() (err, res, body) ->
+        try
+          json = JSON.parse body
+        catch error
+          console.log "semaphoreapp error: #{error}."
+          @msg.reply "Semaphore is talking gibberish right now. Try again later?! :confused:"
+
+        callback json
+
+  rebuildLastRevisionForBranch: (project, branch, callback) ->
+    unless process.env.HUBOT_SEMAPHOREAPP_AUTH_TOKEN
+      @msg.reply "I am not allowed to access Semaphore APIs, sorry. :cry:"
+      return
+
+    @msg.robot.http("https://semaphoreapp.com/api/v1/projects/#{project}/#{branch}/build")
+      .query(auth_token: "#{process.env.HUBOT_SEMAPHOREAPP_AUTH_TOKEN}")
+      .post() (err, res, body) ->
         try
           json = JSON.parse body
         catch error
