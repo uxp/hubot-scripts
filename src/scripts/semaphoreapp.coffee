@@ -61,7 +61,11 @@
 #   exalted, uxp
 #
 
+@adapter = undefined
+
 module.exports = (robot) ->
+  @adapter = robot.adapter.constructor.name
+
   if process.env.HUBOT_SEMAPHOREAPP_TRIGGER
     trigger = process.env.HUBOT_SEMAPHOREAPP_TRIGGER.split(',').join('|')
 
@@ -72,8 +76,49 @@ module.exports = (robot) ->
     projectName = msg.match[1]
     branchName = msg.match[2]
 
-    semaphoreapp.rebuildLastRevisionForBranch projectName, branchName, (rebuild) ->
-      if rebuild.html_url > 0
+    projectHash = robot.brain.get("SemaphoreApp:#{projectName}")
+    branchId = robot.brain.get("SemaphoreApp:#{projectName}:#{branchName}")
+
+    unless projectHash?
+      msg.reply "Woah, I totally don't know about that repo, but let me see if it exists..."
+      semaphoreapp.getListOfAllProjects (projects) ->
+        unless projects.length > 0
+          msg.reply "Something is wrong. I literally can't see a thing. Am I blind?"
+          return
+
+        for p in projects
+          if p.name is projectName
+            project = p
+            break
+
+        unless project?
+          msg.reply "Yeah, I don't know anything about \"#{projectName}\". I don't think it exists."
+          return
+
+        projectHash = project.hash_id
+        robot.brain.set("SemaphoreApp:#{projectName}", projectHash)
+
+    unless branchId?
+      msg.reply "Are you sure that branch exists? Let me check on it first..."
+      semaphoreapp.getListOfBranchesForProject projectHash, (branches) ->
+        unless branchName
+          branchName = 'master'
+
+        for b in branches
+          if b.name is branchName
+            branch = b
+            break
+
+        unless branch?
+          msg.reply "Uh, I don't seem to know about the branch \"#{branchName}\"."
+          return
+
+        branchId = branch.id
+        robot.brain.set("SemaphoreApp:#{projectName}:#{branchName}", branchId)
+
+    semaphoreapp.rebuildLastRevisionForBranch projectHash, branchId, (rebuild) ->
+      console.log(rebuild)
+      if rebuild.html_url
         msg.reply "Rebuilding branch '#{rebuild.branch_name}' of '#{rebuild.project_name}'\n(#{rebuild.html_url})"
 
 
@@ -86,10 +131,11 @@ module.exports = (robot) ->
 
     semaphoreapp.getListOfAllProjects (projects) ->
       unless projects.length > 0
-        msg.reply "I don't know anything really. Sorry. :cry:"
+        msg.reply "I don't know anything really. Sorry. #{embelishEmoji 'cry'}"
         return
 
       # unless projectName
+      #
       #   # TODO recall project name for current user
       unless branchName
         branchName = "master"
@@ -97,7 +143,8 @@ module.exports = (robot) ->
       unless projectName
         if projects.length > 1
           names = (x.name for x in projects)
-          msg.reply "I want to do so many things, trying to decide, but... :sweat: How about #{tellEitherOneOfThese names} instead?"
+          msg.reply "I want to do so many things, trying to decide, but... #{embelishEmoji 'sweat'}\nHow about #{tellEitherOneOfThese names} instead?"
+
           return
         else
           project = projects[0]
@@ -105,23 +152,22 @@ module.exports = (robot) ->
       unless project?
         for x in projects
           if x.name is projectName
-              project = x
-              break
+            project = x
+            break
 
       unless project?
         if projects.length > 1
           names = (x.name for x in projects)
           butTellAlsoThis = "How about #{tellEitherOneOfThese names} instead?"
         else
-          butTellAlsoThis = "Do you mean \"#{projects[0].name}\" perhaps? :wink:"
+          butTellAlsoThis = "Do you mean \"#{projects[0].name}\" perhaps? #{embelishEmoji 'wink'}"
 
-        msg.reply "I don't know anything about \"#{projectName}\" project. Sorry. :cry: #{butTellAlsoThis}"
+        msg.reply "I don't know anything about \"#{projectName}\" project. Sorry. #{embelishEmoji 'cry'}\n#{butTellAlsoThis}"
         return
 
       # TODO remember last asked project name for current user
-
       unless project.branches.length > 0
-        msg.reply "I can't find no branches for \"#{projectName}\" project. Sorry. :cry:"
+        msg.reply "I can't find any branches for the project \"#{projectName}\". Sorry. #{embelishEmoji 'cry'}"
         return
 
       for x in project.branches
@@ -134,12 +180,12 @@ module.exports = (robot) ->
           names = (x.branch_name for x in project.branches)
           butTellAlsoThis = "How about #{tellEitherOneOfThese names} instead?"
         else
-          butTellAlsoThis = "Do you mean \"#{project.branches[0].branch_name}\" perhaps? :wink:"
+          butTellAlsoThis = "Do you mean \"#{project.branches[0].branch_name}\" perhaps? #{embelishEmoji 'wink'}"
 
-        msg.reply "I don't know anything about \"#{branchName}\" branch. Sorry. :cry: #{butTellAlsoThis}"
+        msg.reply "I don't know anything about a branch named \"#{branchName}\" branch. Sorry. #{embelishEmoji 'cry'}\n#{butTellAlsoThis}"
         return
 
-      msg.reply statusMessage branch
+      msg.reply statusMessage(branch)
 
   robot.router.post "/hubot/semaphoreapp", (req, res) ->
     unless process.env.HUBOT_SEMAPHOREAPP_NOTIFY_RULES
@@ -177,16 +223,54 @@ module.exports = (robot) ->
         return
 
       if projectRegExp.test(payload.project_name) && branchRegExp.test(payload.branch_name)
-        robot.messageRoom room, statusMessage payload
+        robot.messageRoom room, statusMessage(robot, payload)
 
 tellEitherOneOfThese = (things) ->
   "\"#{things[...-1].join('\", \"')}\" or \"#{things[-1..]}\""
 
 statusEmoji = (status) ->
-  switch status
-    when "passed" then ":white_check_mark:"
-    when "failed" then ":x:"
-    when "pending" then ":warning:"
+  if @adapter
+    switch @adapter
+      when 'Shell'
+        switch status
+          when "passed" then "☑"
+          when "failed" then "☒"
+          when "pending" then "☐"
+      when 'Campfire'
+        switch status
+          when "passed" then ":white_check_mark:"
+          when "failed" then ":x:"
+          when "pending" then ":warning:"
+      when 'HipChat'
+        switch status
+          when "passed" then "(successful)"
+          when "failed" then "(failed)"
+          when "pending" then "(shrug)"
+
+
+embelishEmoji = (status) ->
+  if @adapter
+    switch @adapter
+      when 'Shell'
+        switch status
+          when "cry" then ":'("
+          when "confused" then ":#"
+          when "wink" then ";)"
+          when "sweat" then ":("
+      when 'Campfire'
+        switch status
+          when "cry" then ":cry:"
+          when "confused" then ":confused:"
+          when "wink" then ":wink:"
+          when "sweat" then ":sweat:"
+      when 'HipChat'
+        switch status
+          when "cry" then "(successful)"
+          when "confused" then ":#"
+          when "wink" then ";)"
+          when "sweat" then "(oops)"
+
+
 
 statusMessage = (branch) ->
   refSpec = "#{branch.project_name}/#{branch.branch_name}"
@@ -202,9 +286,10 @@ class SemaphoreApp
 
   getListOfAllProjects: (callback) ->
     unless process.env.HUBOT_SEMAPHOREAPP_AUTH_TOKEN
-      @msg.reply "I am not allowed to access Semaphore APIs, sorry. :cry:"
+      @msg.reply "I am not allowed to access Semaphore APIs, sorry. #{embelishEmoji 'cry'}"
       return
 
+    msg = @msg
     @msg.robot.http("https://semaphoreapp.com/api/v1/projects")
       .query(auth_token: "#{process.env.HUBOT_SEMAPHOREAPP_AUTH_TOKEN}")
       .get() (err, res, body) ->
@@ -212,22 +297,53 @@ class SemaphoreApp
           json = JSON.parse body
         catch error
           console.log "semaphoreapp error: #{error}."
-          @msg.reply "Semaphore is talking gibberish right now. Try again later?! :confused:"
+          msg.reply "Semaphore is talking gibberish right now. Try again later?! :confused:"
+          return
+
+        callback json
+
+  getListOfBranchesForProject: (projectHash, callback) ->
+    unless process.env.HUBOT_SEMAPHOREAPP_AUTH_TOKEN
+      @msg.reply "I am not allowed to access Semaphore APIs, sorry. #{embelishEmoji 'cry'}"
+      return
+
+    unless projectHash && projectHash.length == 40
+      @msg.reply "I'm sorry, Dave. I'm afraid I can't do that.\nI think you know what the problem is just as well as I do."
+      return
+
+    msg = @msg
+    @msg.robot.http("https://semaphoreapp.com/api/v1/projects/#{projectHash}/branches") # ?auth_token=#{process.env.HUBOT_SEMAPHOREAPP_AUTH_TOKEN}")
+      .query(auth_token: "#{process.env.HUBOT_SEMAPHOREAPP_AUTH_TOKEN}")
+      .get() (err, res, body) ->
+        try
+          json = JSON.parse body
+        catch error
+          console.log "semaphoreapp error: #{error}."
+          msg.reply "Semaphore is talking gibberish right now. Try again later?! #{embelishEmoji 'confused'}"
+          return
 
         callback json
 
   rebuildLastRevisionForBranch: (project, branch, callback) ->
     unless process.env.HUBOT_SEMAPHOREAPP_AUTH_TOKEN
-      @msg.reply "I am not allowed to access Semaphore APIs, sorry. :cry:"
+      @msg.reply "I am not allowed to access Semaphore APIs, sorry. #{embelishEmoji 'cry'}"
       return
 
+    unless project.length == 40
+      @msg.reply "I'm sorry, Dave. I'm afraid I can't do that.\nI think you know what the problem is just as well as I do."
+      return
+
+    msg = @msg
+    data = JSON.stringify({auth_token: "#{process.env.HUBOT_SEMAPHOREAPP_AUTH_TOKEN}"})
     @msg.robot.http("https://semaphoreapp.com/api/v1/projects/#{project}/#{branch}/build")
-      .query(auth_token: "#{process.env.HUBOT_SEMAPHOREAPP_AUTH_TOKEN}")
-      .post() (err, res, body) ->
+      .header('Content-Type', 'application/json')
+      .post(data) (err, res, body) ->
         try
           json = JSON.parse body
         catch error
           console.log "semaphoreapp error: #{error}."
-          @msg.reply "Semaphore is talking gibberish right now. Try again later?! :confused:"
+          msg.reply "Semaphore is talking gibberish right now. Try again later?! #{embelishEmoji 'confused'}"
+          return
 
         callback json
+
