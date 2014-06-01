@@ -203,6 +203,7 @@ module.exports = (robot) ->
       return
 
     res.send()
+    console.log(payload)
 
     rules = process.env.HUBOT_SEMAPHOREAPP_NOTIFY_RULES.split(',')
     for rule in (x.split(':') for x in rules)
