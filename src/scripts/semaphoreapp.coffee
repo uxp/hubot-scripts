@@ -223,7 +223,7 @@ module.exports = (robot) ->
         return
 
       if projectRegExp.test(payload.project_name) && branchRegExp.test(payload.branch_name)
-        robot.messageRoom room, statusMessage(robot, payload)
+        robot.messageRoom room, statusMessage(payload)
 
 tellEitherOneOfThese = (things) ->
   "\"#{things[...-1].join('\", \"')}\" or \"#{things[-1..]}\""
