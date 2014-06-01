@@ -265,7 +265,7 @@ embelishEmoji = (status) ->
           when "sweat" then ":sweat:"
       when 'HipChat'
         switch status
-          when "cry" then "(successful)"
+          when "cry" then ":'("
           when "confused" then ":#"
           when "wink" then ";)"
           when "sweat" then "(oops)"
